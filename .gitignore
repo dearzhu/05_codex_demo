@@ -1,0 +1,31 @@
+# --- Runtime data ---
+data/
+uploads/
+test_data/
+
+# --- Secrets ---
+.env
+
+# --- Logs & PIDs ---
+*.log
+*.pid
+
+# --- Python cache ---
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# --- Virtual environment ---
+.venv/
+.venv_ocr/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
