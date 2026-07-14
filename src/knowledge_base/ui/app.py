@@ -1,9 +1,7 @@
-"""Streamlit UI"""
+"""Streamlit UI — 搜索问答 + 对话历史"""
 
-import json
-import os
-import sys
-from pathlib import Path
+import json, os, uuid
+from datetime import datetime
 
 import streamlit as st
 import httpx
@@ -28,58 +26,198 @@ def api_call(method: str, path: str, **kwargs) -> dict | list | None:
         st.error(f"HTTP {e.response.status_code}: {e.response.text[:200]}")
         return None
     except httpx.RequestError as e:
-        st.error(f"API 连接失败: {e}. 请确认后端服务已启动 (uvicorn src.knowledge_base.main:app)")
+        st.error(f"API 连接失败: {e}")
         return None
 
+
+# ── Session state ──
+
+if "conversations" not in st.session_state:
+    st.session_state.conversations = []  # [{id, query, answer, sources, tokens, timestamp}]
+
+if "viewing_history_id" not in st.session_state:
+    st.session_state.viewing_history_id = None
+
+
+def _timestamp():
+    return datetime.now().strftime("%H:%M:%S")
+
+
+# ── Page config ──
 
 st.set_page_config(page_title="企业知识库", layout="wide")
 st.title("📚 企业知识库检索系统")
 
 # ── Sidebar ──
+
+prev_page = st.session_state.get("_page", "🔍 搜索问答")
 st.sidebar.header("导航")
-page = st.sidebar.radio("", ["🔍 搜索问答", "📄 文档管理", "💬 对话历史"])
+page = st.sidebar.radio("", ["🔍 搜索问答", "📄 文档管理", "💬 对话历史"],
+                        index=["🔍 搜索问答", "📄 文档管理", "💬 对话历史"].index(prev_page))
+st.session_state["_page"] = page
 
-# ── Tab: Search ──
+# ── Helper: render a single conversation block ──
+
+def render_conversation(conv: dict, expanded_sources: bool = False):
+    """Render a Q&A pair as chat messages"""
+    with st.chat_message("user"):
+        st.markdown(conv["query"])
+
+    with st.chat_message("assistant"):
+        answer = conv.get("answer", "")
+        if answer:
+            st.markdown(answer)
+        else:
+            st.caption("（仅检索结果，未启用 RAG 回答）")
+
+        sources = conv.get("sources", [])
+        tokens = conv.get("tokens", 0)
+
+        meta_parts = []
+        if sources:
+            meta_parts.append(f"📎 {len(sources)} 个参考来源")
+        if tokens:
+            meta_parts.append(f"🪙 {tokens} tokens")
+        if meta_parts:
+            st.caption(" | ".join(meta_parts))
+
+        if sources:
+            with st.expander("📎 参考来源", expanded=expanded_sources):
+                for s in sources:
+                    doc_name = s.get("doc_name", "unknown")
+                    score = s.get("score", 0)
+                    chunk = s.get("chunk", "")
+                    st.markdown(f"**[{score:.3f}] {doc_name}**")
+                    st.text(chunk[:300] + ("..." if len(chunk) > 300 else ""))
+                    st.divider()
+
+
+def render_search_results(conv: dict):
+    """Render a search-only result"""
+    with st.chat_message("user"):
+        st.markdown(conv["query"])
+    with st.chat_message("assistant"):
+        st.caption("（以下为检索到的相关文档片段）")
+        results = conv.get("results", [])
+        if results:
+            for r in results:
+                st.markdown(f"**{r.get('doc_name', 'unknown')}** (score: {r['score']:.3f})")
+                st.text(r.get("chunk", "")[:200])
+                st.divider()
+
+
+# ════════════════════════════════════════════════════
+#  TAB 1: 搜索问答
+# ════════════════════════════════════════════════════
+
 if page == "🔍 搜索问答":
-    col1, col2 = st.columns([3, 1])
-    with col2:
+
+    # ── Sidebar settings ──
+    with st.sidebar:
+        st.divider()
         st.subheader("检索设置")
-        top_k = st.slider("返回结果数", 3, 20, 10)
-        use_rag = st.checkbox("启用 RAG 回答", value=True)
-        stream = st.checkbox("流式输出", value=False)
+        top_k = st.slider("返回结果数", 3, 20, 10, key="search_topk")
+        use_rag = st.checkbox("启用 RAG 回答", value=True, key="search_rag")
+        stream = st.checkbox("流式输出", value=False, key="search_stream")
 
-    with col1:
-        query = st.text_input("", placeholder="输入你的问题...", label_visibility="collapsed")
+        if st.session_state.conversations:
+            if st.button("🗑️ 清空对话"):
+                st.session_state.conversations = []
+                st.rerun()
 
-        if query:
-            with st.spinner("正在检索..."):
+    # ── Chat area ──
+    chat_container = st.container()
+
+    with chat_container:
+        # Display existing conversations
+        for conv in st.session_state.conversations:
+            if conv.get("type") == "rag":
+                render_conversation(conv)
+            elif conv.get("type") == "search":
+                render_search_results(conv)
+
+    # ── Chat input ──
+    if prompt := st.chat_input("输入你的问题..."):
+        conv_id = str(uuid.uuid4())[:8]
+
+        # Display user message immediately
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Process
+        with st.chat_message("assistant"):
+            with st.spinner("正在检索..." if not use_rag else "思考中..."):
                 if use_rag:
                     resp = api_call("POST", "/query", json={
-                        "query": query, "top_k": top_k, "stream": stream,
+                        "query": prompt, "top_k": top_k, "stream": stream,
                     })
                     if resp:
-                        st.markdown("### 💡 回答")
-                        st.write(resp.get("answer", ""))
-                        st.caption(f"Token 用量: {resp.get('tokens_used', 0)} | "
-                                   f"来源数: {len(resp.get('sources', []))}")
-                        if resp.get("sources"):
-                            st.markdown("### 📎 参考来源")
-                            for s in resp["sources"]:
-                                with st.expander(f"[{s['score']:.3f}] {s.get('doc_name', 'unknown')}"):
-                                    st.text(s.get("chunk", ""))
+                        answer = resp.get("answer", "")
+                    else:
+                        answer = "请求失败，请稍后重试。"
+
+                    st.markdown(answer)
+
+                    sources = resp.get("sources", []) if resp else []
+                    tokens = resp.get("tokens_used", 0)
+
+                    meta_parts = []
+                    if sources:
+                        meta_parts.append(f"📎 {len(sources)} 个参考来源")
+                    if tokens:
+                        meta_parts.append(f"🪙 {tokens} tokens")
+                    if meta_parts:
+                        st.caption(" | ".join(meta_parts))
+
+                    if sources:
+                        with st.expander("📎 参考来源"):
+                            for s in sources:
+                                doc_name = s.get("doc_name", "unknown")
+                                score = s.get("score", 0)
+                                chunk = s.get("chunk", "")
+                                st.markdown(f"**[{score:.3f}] {doc_name}**")
+                                st.text(chunk[:300] + ("..." if len(chunk) > 300 else ""))
+                                st.divider()
+
+                    st.session_state.conversations.append({
+                        "id": conv_id,
+                        "type": "rag",
+                        "query": prompt,
+                        "answer": answer,
+                        "sources": sources,
+                        "tokens": tokens,
+                        "timestamp": _timestamp(),
+                    })
                 else:
                     resp = api_call("POST", "/search", json={
-                        "query": query, "top_k": top_k,
+                        "query": prompt, "top_k": top_k,
                     })
-                    if resp and resp.get("results"):
-                        st.markdown(f"### 搜索结果 ({len(resp['results'])} 条)")
-                        for r in resp["results"]:
+                    results = resp.get("results", []) if resp else []
+                    if results:
+                        st.caption(f"检索结果 ({len(results)} 条)")
+                        for r in results:
                             st.markdown(f"**{r.get('doc_name', 'unknown')}** "
                                         f"(score: {r['score']:.3f})")
-                            st.text(r.get("chunk", "")[:300])
+                            st.text(r.get("chunk", "")[:200])
                             st.divider()
+                    else:
+                        st.info("未检索到相关内容")
 
-# ── Tab: Documents ──
+                    st.session_state.conversations.append({
+                        "id": conv_id,
+                        "type": "search",
+                        "query": prompt,
+                        "results": results,
+                        "timestamp": _timestamp(),
+                    })
+
+        st.rerun()
+
+
+# ════════════════════════════════════════════════════
+#  TAB 2: 文档管理
+# ════════════════════════════════════════════════════
+
 elif page == "📄 文档管理":
     st.subheader("上传文档")
 
@@ -105,7 +243,8 @@ elif page == "📄 文档管理":
     st.subheader("已上传文档")
 
     status_filter = st.selectbox("筛选状态", ["全部", "completed", "pending", "parsing",
-                                              "chunking", "embedding", "storing", "failed"])
+                                              "chunking", "embedding", "storing", "failed"],
+                                 key="doc_status_filter")
     docs = api_call("GET", "/documents",
                     params={"status": status_filter if status_filter != "全部" else ""})
 
@@ -131,8 +270,57 @@ elif page == "📄 文档管理":
                     api_call("DELETE", f"/documents/{d['id']}")
                     st.rerun()
             st.divider()
+    else:
+        st.info("暂无文档，请先上传")
 
-# ── Tab: Conversation History ──
+
+# ════════════════════════════════════════════════════
+#  TAB 3: 对话历史
+# ════════════════════════════════════════════════════
+
 elif page == "💬 对话历史":
-    st.subheader("对话历史")
-    st.info("对话历史功能将在后续版本中实现。当前可通过 /api/v1/conversation 端点查询。")
+    st.subheader("💬 对话历史")
+
+    conversations = st.session_state.conversations
+
+    if not conversations:
+        st.info("暂无对话记录。前往「🔍 搜索问答」开始提问吧。")
+    else:
+        # Stats
+        rag_count = sum(1 for c in conversations if c.get("type") == "rag")
+        search_count = sum(1 for c in conversations if c.get("type") == "search")
+        st.caption(f"共 {len(conversations)} 条记录（{rag_count} 次问答, {search_count} 次检索）")
+
+        st.divider()
+
+        # Display in reverse chronological order
+        for idx, conv in enumerate(reversed(conversations)):
+            conv_id = conv.get("id", f"conv_{idx}")
+            q_preview = conv["query"][:60] + ("..." if len(conv["query"]) > 60 else "")
+            ts = conv.get("timestamp", "")
+
+            # Expandable conversation card
+            with st.expander(f"**Q:** {q_preview}　⏱ {ts}"):
+                col_left, col_right = st.columns([6, 1])
+
+                with col_left:
+                    if conv.get("type") == "rag":
+                        render_conversation(conv, expanded_sources=True)
+                    elif conv.get("type") == "search":
+                        render_search_results(conv)
+
+                with col_right:
+                    # Delete single conversation
+                    if st.button("🗑️ 删除", key=f"history_del_{conv_id}"):
+                        real_idx = len(conversations) - 1 - idx
+                        st.session_state.conversations.pop(real_idx)
+                        st.rerun()
+
+            st.divider()
+
+        # Clear all
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("🗑️ 清除全部对话记录", type="secondary", use_container_width=True):
+                st.session_state.conversations = []
+                st.rerun()
