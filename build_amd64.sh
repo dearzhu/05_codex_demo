@@ -14,9 +14,9 @@ set -euo pipefail
 #   PUSH=1 REGISTRY=youruser ./build_amd64.sh               # build and push to Docker Hub
 #   REGISTRY=registry.example.com ./build_amd64.sh          # build and push to private registry
 #
-# To transfer to a server without a registry:
-#   docker save knowledge-base:amd64 -o kb-api.tar
-#   docker save knowledge-base-ocr:amd64 -o kb-ocr.tar
+# After a local build, images are saved to the current directory as:
+#   kb-api.tar  (knowledge-base:amd64)
+#   kb-ocr.tar  (knowledge-base-ocr:amd64)
 
 PLATFORM="linux/amd64"
 REGISTRY="${REGISTRY:-}"
@@ -46,6 +46,13 @@ else
     -t "${API_IMAGE}" -f Dockerfile .
 fi
 
+if [ "$PUSH" = "1" ]; then
+  echo "==> PUSH=1: skipping local save for API/UI image"
+else
+  echo "==> Saving API/UI image to ./kb-api.tar"
+  docker save "${API_IMAGE}" -o kb-api.tar
+fi
+
 echo "==> Building OCR image: ${OCR_IMAGE}"
 if [ "$PUSH" = "1" ]; then
   docker buildx build --platform "${PLATFORM}" --push \
@@ -59,15 +66,22 @@ else
     -t "${OCR_IMAGE}" -f Dockerfile.ocr .
 fi
 
+if [ "$PUSH" = "1" ]; then
+  echo "==> PUSH=1: skipping local save for OCR image"
+else
+  echo "==> Saving OCR image to ./kb-ocr.tar"
+  docker save "${OCR_IMAGE}" -o kb-ocr.tar
+fi
+
 echo ""
 echo "Build complete:"
 echo "  ${API_IMAGE}"
 echo "  ${OCR_IMAGE}"
 if [ "$PUSH" = "1" ]; then
-  echo "Images pushed."
+  echo "  Images pushed."
 else
+  echo "  $(pwd)/kb-api.tar"
+  echo "  $(pwd)/kb-ocr.tar"
   echo ""
-  echo "Optional offline transfer:"
-  echo "  docker save ${API_IMAGE} -o kb-api.tar"
-  echo "  docker save ${OCR_IMAGE} -o kb-ocr.tar"
+  echo "  Image tarballs saved in the current directory."
 fi
