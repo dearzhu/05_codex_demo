@@ -1,0 +1,27 @@
+# VCS
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+uv.lock
+
+# Local runtime data
+data
+uploads
+test_data
+*.log
+*.pid
+
+# Secrets
+.env
+
+# Docs
+docs
+README.md
+AGENTS.md
+*.md

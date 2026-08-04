@@ -29,3 +29,6 @@ __pycache__/
 # --- OS ---
 .DS_Store
 Thumbs.db
+
+# Docker image archives
+*.tar

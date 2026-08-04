@@ -1,0 +1,76 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-docker.m.daocloud.io/library/python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: knowledge-base:amd64
+    platform: linux/amd64
+    container_name: kb-api
+    env_file:
+      - .env
+    environment:
+      OCR_SERVICE_URL: http://ocr:8521
+    volumes:
+      - kb-data:/app/data
+      - kb-uploads:/app/uploads
+      - kb-models:/root/.cache
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-docker.m.daocloud.io/library/python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: knowledge-base:amd64
+    platform: linux/amd64
+    container_name: kb-ui
+    command: >
+      streamlit run src/knowledge_base/ui/app.py
+      --server.address 0.0.0.0
+      --server.port 8501
+      --server.headless true
+      --browser.gatherUsageStats false
+    environment:
+      API_BASE_URL: http://api:8000/api/v1
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile.ocr
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-docker.m.daocloud.io/library/python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: knowledge-base-ocr:amd64
+    platform: linux/amd64
+    container_name: kb-ocr
+    volumes:
+      - kb-ocr-models:/root/.paddlex
+    ports:
+      - "8521:8521"
+    profiles: ["ocr"]
+    restart: unless-stopped
+
+volumes:
+  kb-data:
+  kb-uploads:
+  kb-models:
+  kb-ocr-models:
