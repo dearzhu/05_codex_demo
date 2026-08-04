@@ -13,6 +13,7 @@ services:
       - .env
     environment:
       OCR_SERVICE_URL: http://ocr:8521
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
       - kb-data:/app/data
       - kb-uploads:/app/uploads
