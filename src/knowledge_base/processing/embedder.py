@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 _model = None
 _model_lock = threading.Lock()
 _model_version = ""
+_CACHE_SCHEMA_VERSION = "2"
 
 
 def get_model():
@@ -31,8 +32,8 @@ def get_model():
                     settings.embedding_model,
                     device=settings.embedding_device,
                 )
-                _model_version = f"{settings.embedding_model}_v{_model.get_sentence_embedding_dimension()}"
-                logger.info(f"Embedding model ready, dim={_model.get_sentence_embedding_dimension()}")
+                _model_version = f"{settings.embedding_model}_v{_get_embedding_dim(_model)}_{_CACHE_SCHEMA_VERSION}"
+                logger.info(f"Embedding model ready, dim={_get_embedding_dim(_model)}")
     return _model
 
 
@@ -56,7 +57,7 @@ def embed_texts(texts: list[str], batch_size: int = 0) -> list[list[float]]:
     for i, text in enumerate(texts):
         cached = cache.get(text, _model_version)
         if cached is not None:
-            results[i] = cached
+            results[i] = _flatten_embedding(cached)
         else:
             to_encode.append(text)
             to_encode_indices.append(i)
@@ -70,17 +71,12 @@ def embed_texts(texts: list[str], batch_size: int = 0) -> list[list[float]]:
                 show_progress_bar=False,
                 normalize_embeddings=True,
             )
-            # If single result, wrap in list
-            if len(to_encode) == 1:
-                embeddings = [embeddings]
-
-            for idx, emb in zip(to_encode_indices, embeddings):
+            # model.encode(list) always returns shape (n, dim), even for n == 1.
+            for pos, idx in enumerate(to_encode_indices):
+                emb = embeddings[pos]
                 emb_list = emb.tolist() if hasattr(emb, "tolist") else list(emb)
-                results[idx] = emb_list
-                cache.set(to_encode[to_encode_indices.index(idx)
-                                     if to_encode_indices.index(idx) < len(to_encode)
-                                     else 0],
-                          emb_list, _model_version)
+                results[idx] = _flatten_embedding(emb_list)
+                cache.set(to_encode[pos], _flatten_embedding(emb_list), _model_version)
 
         except Exception as e:
             logger.error(f"Embedding failed: {e}")
@@ -90,6 +86,21 @@ def embed_texts(texts: list[str], batch_size: int = 0) -> list[list[float]]:
     if len(final) != len(texts):
         logger.warning(f"Embedding mismatch: {len(final)}/{len(texts)}")
     return final
+
+
+def _get_embedding_dim(model) -> int:
+    """Return embedding dimension, handling sentence-transformers API renames."""
+    for method in ("get_embedding_dimension", "get_sentence_embedding_dimension"):
+        if hasattr(model, method):
+            return int(getattr(model, method)())
+    return 1024
+
+
+def _flatten_embedding(emb):
+    """Unwrap legacy nested embeddings stored by an earlier buggy version."""
+    while isinstance(emb, list) and emb and isinstance(emb[0], list):
+        emb = emb[0]
+    return emb
 
 
 def embed_text(text: str) -> list[float]:

@@ -44,8 +44,8 @@ async def rag_query(query: str, top_k: int = 10, stream: bool = False,
     context_parts = []
     sources = []
     for r in reranked:
-        meta = r.get("metadata", {})
-        doc_id = meta.get("doc_id", "unknown")
+        meta = r.get("metadata") or {}
+        doc_id = meta.get("doc_id") or r.get("doc_id") or "unknown"
         doc_name = _get_doc_name(doc_id)
         chunk_text = r.get("document", "")
         if chunk_text:
@@ -96,8 +96,8 @@ async def search_only(query: str, top_k: int = 10) -> dict:
     reranked = await rerank(rewritten, search_results, top_k=min(top_k, settings.rerank_top_k))
     sources = []
     for r in reranked:
-        meta = r.get("metadata", {})
-        doc_id = meta.get("doc_id", "unknown")
+        meta = r.get("metadata") or {}
+        doc_id = meta.get("doc_id") or r.get("doc_id") or "unknown"
         doc_name = _get_doc_name(doc_id)
         sources.append({
             "doc_name": doc_name,

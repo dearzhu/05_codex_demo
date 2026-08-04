@@ -29,8 +29,22 @@ async def rerank(query: str, results: list[dict], top_k: int = 10,
     """Rerank results using cross-encoder"""
     if not results:
         return results
+    results = [r for r in results if isinstance(r, dict)]
+    if not results:
+        return []
 
-    model = get_reranker()
+    try:
+        model = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, get_reranker),
+            timeout=max(timeout, 30.0),
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Reranker model load timed out, using original order")
+        return results[:top_k]
+    except Exception as e:
+        logger.error(f"Reranker model load failed: {e}")
+        return results[:top_k]
+
     if model is None:
         return results[:top_k]
 

@@ -21,7 +21,7 @@ def rewrite_query(query: str, history: Optional[list[dict]] = None) -> str:
     if history and len(history) > 1:
         last_q = ""
         for msg in reversed(history):
-            if msg.get("role") == "user":
+            if msg and msg.get("role") == "user":
                 last_q = msg.get("content", "")
                 break
         if last_q and query != last_q and len(query) < 10:

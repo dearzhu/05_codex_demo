@@ -84,6 +84,8 @@ def render_conversation(conv: dict, expanded_sources: bool = False):
         if sources:
             with st.expander("📎 参考来源", expanded=expanded_sources):
                 for s in sources:
+                    if s is None:
+                        continue
                     doc_name = s.get("doc_name", "unknown")
                     score = s.get("score", 0)
                     chunk = s.get("chunk", "")
@@ -101,6 +103,8 @@ def render_search_results(conv: dict):
         results = conv.get("results", [])
         if results:
             for r in results:
+                if r is None:
+                    continue
                 st.markdown(f"**{r.get('doc_name', 'unknown')}** (score: {r['score']:.3f})")
                 st.text(r.get("chunk", "")[:200])
                 st.divider()
@@ -131,6 +135,8 @@ if page == "🔍 搜索问答":
     with chat_container:
         # Display existing conversations
         for conv in st.session_state.conversations:
+            if conv is None:
+                continue
             if conv.get("type") == "rag":
                 render_conversation(conv)
             elif conv.get("type") == "search":
@@ -172,6 +178,8 @@ if page == "🔍 搜索问答":
                     if sources:
                         with st.expander("📎 参考来源"):
                             for s in sources:
+                                if s is None:
+                                    continue
                                 doc_name = s.get("doc_name", "unknown")
                                 score = s.get("score", 0)
                                 chunk = s.get("chunk", "")
@@ -196,6 +204,8 @@ if page == "🔍 搜索问答":
                     if results:
                         st.caption(f"检索结果 ({len(results)} 条)")
                         for r in results:
+                            if r is None:
+                                continue
                             st.markdown(f"**{r.get('doc_name', 'unknown')}** "
                                         f"(score: {r['score']:.3f})")
                             st.text(r.get("chunk", "")[:200])
@@ -250,6 +260,8 @@ elif page == "📄 文档管理":
 
     if docs:
         for d in docs:
+            if d is None:
+                continue
             col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
             with col1:
                 st.markdown(f"**{d['filename']}**")
@@ -287,14 +299,16 @@ elif page == "💬 对话历史":
         st.info("暂无对话记录。前往「🔍 搜索问答」开始提问吧。")
     else:
         # Stats
-        rag_count = sum(1 for c in conversations if c.get("type") == "rag")
-        search_count = sum(1 for c in conversations if c.get("type") == "search")
+        rag_count = sum(1 for c in conversations if c and c.get("type") == "rag")
+        search_count = sum(1 for c in conversations if c and c.get("type") == "search")
         st.caption(f"共 {len(conversations)} 条记录（{rag_count} 次问答, {search_count} 次检索）")
 
         st.divider()
 
         # Display in reverse chronological order
         for idx, conv in enumerate(reversed(conversations)):
+            if conv is None:
+                continue
             conv_id = conv.get("id", f"conv_{idx}")
             q_preview = conv["query"][:60] + ("..." if len(conv["query"]) > 60 else "")
             ts = conv.get("timestamp", "")

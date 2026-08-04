@@ -45,10 +45,24 @@ async def lifespan(app: FastAPI):
     # Build initial BM25 index
     try:
         from .retrieval.hybrid_search import rebuild_bm25
+        import json
         with get_read_conn() as conn:
-            rows = conn.execute("SELECT content FROM chunks").fetchall()
+            rows = conn.execute(
+                "SELECT content, doc_id, metadata_json FROM chunks"
+            ).fetchall()
         if rows:
-            rebuild_bm25([{"content": r["content"]} for r in rows])
+            chunks = []
+            for r in rows:
+                try:
+                    meta = json.loads(r["metadata_json"] or "{}")
+                except Exception:
+                    meta = {}
+                chunks.append({
+                    "content": r["content"],
+                    "doc_id": r["doc_id"],
+                    "metadata": meta,
+                })
+            rebuild_bm25(chunks)
             logger.info(f"BM25 index built: {len(rows)} chunks")
     except Exception as e:
         logger.debug(f"BM25 initial build skipped: {e}")

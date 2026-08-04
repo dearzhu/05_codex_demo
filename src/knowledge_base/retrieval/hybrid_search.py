@@ -77,7 +77,7 @@ async def hybrid_search(query: str, top_k: int = 30, alpha: float = 0.7,
 
     # Fusion
     merged = _fusion(vector_results, bm25_results, alpha)
-    merged = merged[:settings.rerank_top_k]
+    merged = merged[:min(top_k, settings.rerank_top_k)]
 
     return merged, elapsed
 
@@ -137,6 +137,8 @@ def _bm25_search_sync(query: str, top_k: int) -> list[dict]:
 def _fusion(vector_results: list[dict], bm25_results: list[dict],
             alpha: float) -> list[dict]:
     """Reciprocal Rank Fusion with alpha weighting"""
+    vector_results = [v for v in vector_results if v is not None]
+    bm25_results = [b for b in bm25_results if b is not None]
     seen = set()
     combined = []
 
@@ -154,6 +156,7 @@ def _fusion(vector_results: list[dict], bm25_results: list[dict],
 
     for v in vector_results:
         doc_id = v.get("id", "")
+        v_meta = v.get("metadata") or {}
         score = alpha * (1.0 - v.get("distance", 0))
         if bm25_results:
             for b in bm25_results:
@@ -162,8 +165,9 @@ def _fusion(vector_results: list[dict], bm25_results: list[dict],
                     break
         combined.append({
             "id": doc_id,
+            "doc_id": v_meta.get("doc_id", ""),
             "document": v.get("document", ""),
-            "metadata": v.get("metadata", {}),
+            "metadata": v_meta,
             "score": round(score, 4),
         })
         seen.add(doc_id)
@@ -172,10 +176,14 @@ def _fusion(vector_results: list[dict], bm25_results: list[dict],
     for b in bm25_results:
         bid = b.get("id") or b.get("chunk_id", "")
         if bid not in seen:
+            bm25_meta = dict(b.get("metadata") or {})
+            if b.get("doc_id") and not bm25_meta.get("doc_id"):
+                bm25_meta["doc_id"] = b.get("doc_id")
             combined.append({
                 "id": bid,
+                "doc_id": b.get("doc_id", ""),
                 "document": b.get("content", ""),
-                "metadata": b.get("metadata", {}),
+                "metadata": bm25_meta,
                 "score": round((1 - alpha) * b.get("bm25_score", 0), 4),
             })
 

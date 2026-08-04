@@ -42,12 +42,7 @@ class VectorStore:
             self._chunks_collection.add(
                 ids=[c.chunk_id for c in chunks],
                 embeddings=[c.embedding for c in chunks],
-                metadatas=[{
-                    "doc_id": c.doc_id,
-                    "heading": c.metadata.get("heading", ""),
-                    "page": c.metadata.get("estimated_pages", 0),
-                    "filetype": c.metadata.get("filetype", ""),
-                } for c in chunks],
+                metadatas=[_chunk_metadata(c) for c in chunks],
                 documents=[c.content[:1000] for c in chunks],
             )
         logger.debug(f"Added {len(chunks)} chunks to vector store")
@@ -76,10 +71,11 @@ class VectorStore:
         items = []
         if results["ids"] and results["ids"][0]:
             for i in range(len(results["ids"][0])):
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                 items.append({
                     "id": results["ids"][0][i],
                     "document": results["documents"][0][i] if results["documents"] else "",
-                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
+                    "metadata": metadata or {},
                     "distance": results["distances"][0][i] if results["distances"] else 0.0,
                 })
         return items
@@ -91,9 +87,10 @@ class VectorStore:
         items = []
         if results["ids"] and results["ids"][0]:
             for i in range(len(results["ids"][0])):
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                 items.append({
                     "id": results["ids"][0][i],
-                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
+                    "metadata": metadata or {},
                     "distance": results["distances"][0][i] if results["distances"] else 0.0,
                 })
         return items
@@ -105,6 +102,17 @@ class VectorStore:
 
     def count(self) -> int:
         return self._chunks_collection.count()
+
+
+def _chunk_metadata(chunk) -> dict:
+    """Flatten chunk metadata for Chroma, tolerating a missing dict."""
+    meta = chunk.metadata or {}
+    return {
+        "doc_id": chunk.doc_id,
+        "heading": meta.get("heading", ""),
+        "page": meta.get("estimated_pages", 0),
+        "filetype": meta.get("filetype", ""),
+    }
 
 
 _default_store: Optional[VectorStore] = None

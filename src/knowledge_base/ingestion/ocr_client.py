@@ -44,7 +44,8 @@ class OCRClient:
         """检查服务是否可用"""
         try:
             resp = httpx.get(f"{self.base_url}/health", timeout=5)
-            return resp.json().get("status") == "ok"
+            data = resp.json()
+            return isinstance(data, dict) and data.get("status") == "ok"
         except Exception:
             return False
 

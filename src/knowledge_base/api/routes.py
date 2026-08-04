@@ -217,7 +217,9 @@ async def delete_document(doc_id: str):
 
     # Delete from vector store
     try:
-        get_vector_store().delete_document_chunks(doc_id)
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: get_vector_store().delete_document_chunks(doc_id)
+        )
     except Exception as e:
         logger.warning(f"Vector store delete error: {e}")
 
@@ -310,7 +312,9 @@ def _enqueue_processing(doc_id: str, file_path: str):
                                               chunk_count=len(chunks))
 
             # 5. Store in vector DB
-            await loop.run_in_executor(None, get_vector_store().add_chunks, chunks)
+            await loop.run_in_executor(
+                None, lambda: get_vector_store().add_chunks(chunks)
+            )
 
             # 6. Store in SQLite
             meta_store.save_chunks(chunks)
@@ -341,7 +345,17 @@ def _rebuild_bm25_index():
 
     with get_read_conn() as conn:
         rows = conn.execute(
-            "SELECT content FROM chunks WHERE content IS NOT NULL"
+            "SELECT content, doc_id, metadata_json FROM chunks WHERE content IS NOT NULL"
         ).fetchall()
-    chunks_data = [{"content": r["content"]} for r in rows]
+    chunks_data = []
+    for r in rows:
+        try:
+            meta = json.loads(r["metadata_json"] or "{}")
+        except Exception:
+            meta = {}
+        chunks_data.append({
+            "content": r["content"],
+            "doc_id": r["doc_id"],
+            "metadata": meta,
+        })
     rebuild_bm25(chunks_data)
